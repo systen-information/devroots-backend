@@ -993,6 +993,22 @@ app.post('/api/admin/seed', auth, adminOnly, async (req, res) => {
 });
 
 // Health check
+// Public stats (no auth required)
+app.get('/api/stats/public', async (req, res) => {
+  try {
+    const users = await db('SELECT COUNT(*) as count FROM users');
+    const threads = await db('SELECT COUNT(*) as count FROM threads WHERE is_deleted = FALSE');
+    const posts = await db('SELECT COUNT(*) as count FROM posts WHERE is_deleted = FALSE');
+    const products = await db('SELECT COUNT(*) as count FROM products WHERE is_approved = TRUE AND is_deleted = FALSE');
+    res.json({
+      developers: parseInt(users.rows[0].count),
+      discussions: parseInt(threads.rows[0].count),
+      projectsShared: parseInt(products.rows[0].count),
+      posts: parseInt(posts.rows[0].count)
+    });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
 app.get('/api/health', (req, res) => {
   res.json({ status: 'ok', service: 'DevRoots API', timestamp: new Date().toISOString() });
 });
