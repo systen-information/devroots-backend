@@ -780,6 +780,218 @@ app.put('/api/notifications/read', auth, async (req, res) => {
   }
 });
 
+// ============================================================
+// SEED DATA — Call once to fill with sample data
+// ============================================================
+app.post('/api/admin/seed', auth, adminOnly, async (req, res) => {
+  try {
+    // Check if already seeded
+    const userCount = await db('SELECT COUNT(*) as count FROM users');
+    if (parseInt(userCount.rows[0].count) > 5) {
+      return res.json({ message: 'Already seeded', skipped: true });
+    }
+
+    console.log('🌱 Seeding sample data...');
+
+    // Create sample users
+    const sampleUsers = [
+      ['NexusCraft', 'nexus@devroots.com', 'developer', '🧙', 'Full-stack dev specializing in Rappelz server emulation. Building custom content since 2018.', 1850],
+      ['ByteForge', 'byte@devroots.com', 'developer', '⚒️', 'Client modding expert. Texture packs, UI overhauls, and performance optimizations.', 1420],
+      ['ShadowScript', 'shadow@devroots.com', 'moderator', '🦊', 'Community moderator and NPC scripting enthusiast. Quest designer.', 2100],
+      ['RuneMaster', 'rune@devroots.com', 'developer', '🔮', 'Database architect. Building tools for Rappelz server management.', 980],
+      ['PhoenixDev', 'phoenix@devroots.com', 'member', '🐦', 'New to Rappelz development. Learning server setup and configuration.', 340],
+      ['CrystalByte', 'crystal@devroots.com', 'developer', '💎', 'Security researcher and anti-cheat developer for private servers.', 1650],
+      ['StormCoder', 'storm@devroots.com', 'member', '⚡', 'Python scripter working on automation tools for server management.', 520],
+      ['IronClad', 'iron@devroots.com', 'developer', '🛡️', 'Veteran developer. Running a private server community since 2015.', 3200],
+    ];
+
+    const userIds = [];
+    const hash = await bcrypt.hash('password123', 10);
+    for (const [username, email, role, avatar, bio, rep] of sampleUsers) {
+      const existing = await db('SELECT id FROM users WHERE email = $1', [email]);
+      if (existing.rows.length > 0) {
+        userIds.push(existing.rows[0].id);
+        continue;
+      }
+      const r = await db(
+        'INSERT INTO users (username, email, password_hash, role, avatar, bio, reputation) VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING id',
+        [username, email, hash, role, avatar, bio, rep]
+      );
+      userIds.push(r.rows[0].id);
+      await db('INSERT INTO user_balances (user_id) VALUES ($1) ON CONFLICT DO NOTHING', [r.rows[0].id]);
+    }
+
+    // Get admin user
+    const adminUser = await db("SELECT id FROM users WHERE role = 'admin' LIMIT 1");
+    const adminId = adminUser.rows[0]?.id || userIds[0];
+
+    // Get categories
+    const cats = await db('SELECT id, slug FROM forum_categories ORDER BY sort_order');
+    const catMap = {};
+    for (const c of cats.rows) catMap[c.slug] = c.id;
+
+    // Create sample threads and posts
+    const sampleThreads = [
+      { cat: 'server-dev', author: adminId, title: 'Complete Guide: Setting Up EP9.5 Server from Scratch', titleAr: 'دليل كامل: إعداد سيرفر EP9.5 من الصفر',
+        content: "Welcome to the definitive guide for setting up your own Rappelz EP9.5 server.\n\nPrerequisites:\n- Windows Server 2019+ or Ubuntu 22.04\n- MySQL 8.0 or MariaDB 10.6\n- .NET Framework 4.8\n- Minimum 8GB RAM, 4 cores\n\nStep 1: Database Setup\nFirst, create your database schema. Import the base SQL files from the release package.\n\nStep 2: Server Configuration\nEdit your server.ini file with your network settings. Make sure ports 4000-4010 are open.\n\nStep 3: Client Patching\nPatch your client data to match the server version.\n\nI'll be updating this guide regularly. Feel free to ask questions below!",
+        contentAr: "مرحباً بكم في الدليل الشامل لإعداد سيرفر رابلز EP9.5 الخاص بك.\n\nالمتطلبات:\n- ويندوز سيرفر 2019 أو أحدث أو أوبونتو 22.04\n- MySQL 8.0 أو MariaDB 10.6\n- .NET Framework 4.8\n- الحد الأدنى 8 جيجا رام و 4 أنوية\n\nسأقوم بتحديث هذا الدليل بانتظام. لا تتردد في طرح الأسئلة أدناه!",
+        pinned: true, tags: ['guide', 'ep9.5', 'setup'] },
+      { cat: 'server-dev', author: userIds[0], title: 'How to fix login server timeout issues', titleAr: 'كيفية إصلاح مشاكل انتهاء وقت سيرفر الدخول',
+        content: "Has anyone dealt with login server timeouts after EP9.5 migration?\n\nI'm getting consistent 30-second timeouts when players try to authenticate. The auth server logs show:\n\n[ERROR] Connection pool exhausted - max connections: 100\n\nI've tried:\n1. Increasing max_connections in MySQL\n2. Adding connection pooling via ProxySQL\n3. Optimizing the auth query\n\nNothing seems to work. Server specs: 16GB RAM, 8-core Xeon, SSD storage.\n\nAny ideas?",
+        tags: ['bug', 'login', 'timeout'] },
+      { cat: 'server-dev', author: userIds[7], title: 'Rate Limiting Best Practices for Private Servers', titleAr: 'أفضل ممارسات تحديد المعدل للسيرفرات الخاصة',
+        content: "After running a 500-player server for 3 years, here are my rate limiting recommendations:\n\n1. Login attempts: 5 per minute per IP\n2. Chat messages: 10 per 5 seconds\n3. Trade requests: 3 per minute\n4. Item drops: Server-side validation only\n\nI use a custom Redis-based rate limiter. Here's the basic architecture...\n\nHappy to share the full implementation if there's interest.",
+        tags: ['security', 'performance', 'guide'] },
+
+      { cat: 'client-mod', author: userIds[1], title: 'HD Texture Pack v3.0 - Complete Overhaul Released!', titleAr: 'حزمة نسيج عالية الدقة v3.0 - إصدار الإصلاح الشامل!',
+        content: "After 6 months of work, I'm proud to release HD Texture Pack v3.0!\n\nWhat's included:\n- All terrain textures upscaled to 2048x2048\n- Character textures redrawn at 4K resolution\n- New particle effects for skills\n- Optimized for minimal FPS impact\n\nBefore/After screenshots attached in the download.\n\nDownload from the shop or check the releases section.\n\nPlease report any visual glitches!",
+        pinned: true, tags: ['textures', 'hd', 'release'] },
+      { cat: 'client-mod', author: userIds[5], title: 'Custom UI Framework - Make Your Own Interface', titleAr: 'إطار واجهة مخصص - صمم واجهتك الخاصة',
+        content: "I've built a modular UI framework that lets you completely redesign the Rappelz client interface.\n\nFeatures:\n- Drag-and-drop UI editor\n- Custom color themes\n- Resizable windows\n- XML-based layout system\n- Hot-reload support\n\nThe framework hooks into the client's rendering pipeline without modifying core files.\n\nDocumentation: https://github.com/crystalbyte/rappelz-ui-framework",
+        tags: ['ui', 'framework', 'modding'] },
+
+      { cat: 'db-tools', author: userIds[3], title: 'ServerMonitor v2.0 - Real-time Dashboard for Your Server', titleAr: 'ServerMonitor v2.0 - لوحة مراقبة في الوقت الحقيقي لسيرفرك',
+        content: "Introducing ServerMonitor v2.0 - a web-based dashboard for monitoring your Rappelz server.\n\nFeatures:\n- Real-time player count\n- CPU/RAM/Disk usage graphs\n- Active session tracking\n- Error log aggregation\n- Automated alerts (Discord/Email)\n- Database query performance\n\nBuilt with Node.js + React + WebSockets.\n\nFree for servers under 100 players, premium license for larger servers.\n\nCheck it out in the shop!",
+        tags: ['monitoring', 'dashboard', 'tool'] },
+      { cat: 'db-tools', author: userIds[6], title: 'Python script for automated database backups', titleAr: 'سكربت بايثون للنسخ الاحتياطي التلقائي لقاعدة البيانات',
+        content: "Sharing my backup automation script that I use on my server.\n\nWhat it does:\n- Full database dump every 6 hours\n- Incremental backups every hour\n- Automatic compression (saves 70% space)\n- Upload to S3/Google Drive\n- Keeps last 30 days of backups\n- Email notification on failure\n\nRequires: Python 3.8+, mysqldump, cron\n\nFull source code below. MIT licensed.",
+        tags: ['python', 'backup', 'automation'] },
+
+      { cat: 'scripting', author: userIds[2], title: 'NPC Scripting Tutorial Series - Part 1: Basics', titleAr: 'سلسلة دروس برمجة NPC - الجزء 1: الأساسيات',
+        content: "Starting a comprehensive NPC scripting tutorial series!\n\nPart 1 covers:\n- Understanding the NPC script structure\n- Basic dialog trees\n- Item shop NPCs\n- Quest givers (simple fetch quests)\n- Teleport NPCs\n\nEach example includes the full script with line-by-line explanations.\n\nI'll be posting a new part every week covering increasingly complex topics.\n\nPart 2 will cover: Conditional logic, player checks, and timed events.",
+        pinned: true, tags: ['tutorial', 'npc', 'scripting'] },
+      { cat: 'scripting', author: userIds[2], title: 'Custom Boss AI - Making Fights Interesting', titleAr: 'ذكاء اصطناعي مخصص للبوس - جعل المعارك ممتعة',
+        content: "Generic boss fights are boring. Here's how to create dynamic boss encounters.\n\nPhase-based system:\n- Phase 1 (100-70% HP): Normal attacks + random skill rotation\n- Phase 2 (70-40% HP): New skills unlock, aggro table manipulation\n- Phase 3 (40-0% HP): Enrage, AoE spam, add spawning\n\nKey techniques:\n1. Timer-based skill queuing\n2. HP threshold triggers\n3. Player proximity checks\n4. Random target selection\n\nExample script for a 3-phase dragon boss included.",
+        tags: ['boss', 'ai', 'advanced'] },
+
+      { cat: 'releases', author: userIds[7], title: '[Release] EP9.5 Full Server Package - Ready to Deploy', titleAr: '[إصدار] حزمة سيرفر EP9.5 كاملة - جاهزة للنشر',
+        content: "Releasing my complete EP9.5 server package for the community.\n\nIncludes:\n- Pre-configured server binaries\n- Complete database with all items/skills/maps\n- Launcher with auto-updater\n- Basic anti-cheat module\n- Setup documentation\n- Docker compose file for easy deployment\n\nTested on Windows Server 2022 and Ubuntu 22.04.\n\nPlease credit if you use this as a base for your server.\n\nReport issues in the Help section.",
+        tags: ['ep9.5', 'server-files', 'release'] },
+      { cat: 'releases', author: userIds[1], title: '[Release] Custom Launcher with Discord Integration', titleAr: '[إصدار] لانشر مخصص مع تكامل ديسكورد',
+        content: "New custom launcher release!\n\nFeatures:\n- Modern dark UI with server branding\n- Discord Rich Presence\n- Auto-patch system with progress bar\n- Server status indicator\n- News feed from your website\n- Multi-language support\n\nBuilt with Electron. Fully customizable.\n\nSource code available on GitHub.",
+        tags: ['launcher', 'discord', 'electron'] },
+
+      { cat: 'help', author: userIds[4], title: 'Server crashes when more than 50 players online', titleAr: 'السيرفر يتوقف عند وجود أكثر من 50 لاعب',
+        content: "Hi everyone, I'm new to server development and having a critical issue.\n\nMy server runs fine with under 50 players, but consistently crashes when we hit 50+.\n\nError log shows:\n[FATAL] Memory allocation failed - heap size exceeded\n\nServer specs:\n- Windows 10 (not server edition)\n- 8GB RAM\n- i5-10400\n- MySQL on same machine\n\nI've set the heap size to 4GB but it still crashes. Any help appreciated!",
+        tags: ['crash', 'memory', 'help-needed'] },
+      { cat: 'help', author: userIds[6], title: 'How to compile client from source?', titleAr: 'كيف أقوم بتجميع العميل من المصدر؟',
+        content: "I have the client source code but I'm struggling to compile it.\n\nGetting these errors:\n- Missing DirectX SDK headers\n- Linker errors for boost libraries\n- Unknown pragma warnings\n\nI'm using Visual Studio 2022 on Windows 11.\n\nHas anyone successfully compiled the client recently? What SDK versions do I need?\n\nThanks in advance!",
+        tags: ['compile', 'client', 'help-needed'] },
+    ];
+
+    // Insert threads and their initial posts
+    for (const th of sampleThreads) {
+      const catId = catMap[th.cat];
+      if (!catId) continue;
+
+      const thread = await db(
+        'INSERT INTO threads (category_id, author_id, title, title_ar, is_pinned) VALUES ($1,$2,$3,$4,$5) RETURNING id',
+        [catId, th.author, th.title, th.titleAr || null, th.pinned || false]
+      );
+
+      await db(
+        'INSERT INTO posts (thread_id, author_id, content, content_ar) VALUES ($1,$2,$3,$4)',
+        [thread.rows[0].id, th.author, th.content, th.contentAr || null]
+      );
+
+      // Add tags
+      if (th.tags) {
+        for (const tagName of th.tags) {
+          let tag = await db('SELECT id FROM tags WHERE name = $1', [tagName]);
+          if (tag.rows.length === 0) {
+            tag = await db('INSERT INTO tags (name) VALUES ($1) RETURNING id', [tagName]);
+          }
+          await db('INSERT INTO thread_tags (thread_id, tag_id) VALUES ($1,$2) ON CONFLICT DO NOTHING', [thread.rows[0].id, tag.rows[0].id]);
+        }
+      }
+    }
+
+    // Add replies to some threads
+    const allThreads = await db('SELECT id, author_id FROM threads ORDER BY id LIMIT 14');
+    const replies = [
+      { content: "Great guide! This saved me hours of troubleshooting. One question - do I need to configure the firewall rules separately for the auth server?", author: userIds[4] },
+      { content: "Thanks for this! I followed the steps and got my server running on the first try. The database section was especially clear.", author: userIds[6] },
+      { content: "Pro tip: use MariaDB instead of MySQL for better performance with Rappelz. I've benchmarked both and MariaDB handles concurrent connections 20% faster.", author: userIds[7] },
+      { content: "I had the same timeout issue. The fix was to add connection pooling at the application level, not just the database level. Check your server's connection handling code.", author: userIds[3] },
+      { content: "Have you tried increasing the worker thread count? Default is usually 4, but for 500+ players you need at least 8.", author: userIds[0] },
+      { content: "The textures look amazing! Any plans for weapon textures in v3.1?", author: userIds[4] },
+      { content: "Incredible work on the UI framework! I'm using it on my server and players love the customizable interface.", author: userIds[7] },
+      { content: "This monitoring tool is exactly what I needed. The Discord alerts have caught two potential crashes before they happened.", author: userIds[0] },
+      { content: "Looking forward to Part 2! Your tutorial style is very beginner-friendly.", author: userIds[4] },
+      { content: "The boss AI system is brilliant. I adapted it for a custom dungeon and my players are having a blast.", author: userIds[7] },
+      { content: "Thanks for releasing this! Running it on Docker made setup incredibly easy.", author: userIds[6] },
+      { content: "You're running on Windows 10 — that's your problem. Windows 10 has a connection limit. Switch to Windows Server or Linux.", author: userIds[7] },
+      { content: "For compilation, you need DirectX SDK June 2010 specifically. Newer versions won't work. Also use Boost 1.72.", author: userIds[0] },
+    ];
+
+    for (let i = 0; i < Math.min(replies.length, allThreads.rows.length); i++) {
+      const th = allThreads.rows[i];
+      await db(
+        'INSERT INTO posts (thread_id, author_id, content) VALUES ($1,$2,$3)',
+        [th.id, replies[i].author, replies[i].content]
+      );
+      await db('UPDATE threads SET updated_at = NOW() WHERE id = $1', [th.id]);
+    }
+
+    // Add some post likes
+    const allPosts = await db('SELECT id FROM posts LIMIT 20');
+    for (const post of allPosts.rows) {
+      const likers = userIds.sort(() => Math.random() - 0.5).slice(0, Math.floor(Math.random() * 4) + 1);
+      for (const liker of likers) {
+        await db('INSERT INTO post_likes (post_id, user_id) VALUES ($1,$2) ON CONFLICT DO NOTHING', [post.id, liker]);
+      }
+    }
+
+    // Create sample products
+    const sampleProducts = [
+      { seller: userIds[1], title: 'HD Texture Pack v3.0', titleAr: 'حزمة نسيج عالية الدقة v3.0', desc: 'Complete texture overhaul for Rappelz EP9.5. All terrain, character, and effect textures remastered in HD.', descAr: 'إعادة تصميم كاملة للنسيج لـ Rappelz EP9.5. جميع نسيج التضاريس والشخصيات والتأثيرات بدقة عالية.', price: 14.99, cat: 'Textures', img: '🎨', approved: true },
+      { seller: userIds[3], title: 'ServerMonitor Pro', titleAr: 'مراقب السيرفر برو', desc: 'Real-time web dashboard for monitoring your Rappelz server. Player stats, performance graphs, automated alerts.', descAr: 'لوحة مراقبة ويب في الوقت الحقيقي لسيرفر رابلز. إحصائيات اللاعبين، رسوم الأداء، تنبيهات تلقائية.', price: 24.99, cat: 'Tools', img: '📊', approved: true },
+      { seller: userIds[0], title: 'EP9.5 Server Files + Database', titleAr: 'ملفات سيرفر EP9.5 + قاعدة البيانات', desc: 'Complete, tested EP9.5 server package with pre-configured database. Docker support included.', descAr: 'حزمة سيرفر EP9.5 كاملة ومختبرة مع قاعدة بيانات مسبقة التكوين. يتضمن دعم Docker.', price: 0, cat: 'Server Files', img: '📦', approved: true },
+      { seller: userIds[5], title: 'UI Framework Kit', titleAr: 'مجموعة إطار الواجهة', desc: 'Modular UI framework for completely redesigning the Rappelz client interface. Drag-and-drop editor included.', descAr: 'إطار واجهة معياري لإعادة تصميم واجهة عميل رابلز بالكامل. يتضمن محرر السحب والإفلات.', price: 19.99, cat: 'Mods', img: '🖥️', approved: true },
+      { seller: userIds[2], title: 'NPC Script Collection', titleAr: 'مجموعة سكربتات NPC', desc: '50+ ready-to-use NPC scripts: shops, quest givers, teleporters, event NPCs, custom bosses.', descAr: '50+ سكربت NPC جاهز للاستخدام: متاجر، مانحي مهام، ناقلات، NPCs أحداث، بوسات مخصصة.', price: 9.99, cat: 'Scripts', img: '📜', approved: true },
+      { seller: userIds[1], title: 'Custom Launcher v2', titleAr: 'لانشر مخصص v2', desc: 'Modern Electron-based launcher with Discord integration, auto-patcher, and server status.', descAr: 'لانشر حديث مبني على Electron مع تكامل Discord وتحديث تلقائي وحالة السيرفر.', price: 29.99, cat: 'Tools', img: '🚀', approved: true },
+      { seller: userIds[7], title: 'Anti-Cheat Module', titleAr: 'وحدة مكافحة الغش', desc: 'Server-side anti-cheat system detecting speed hacks, teleport hacks, item duplication, and memory editing.', descAr: 'نظام مكافحة غش من جانب السيرفر يكتشف اختراقات السرعة والتنقل ونسخ العناصر وتعديل الذاكرة.', price: 39.99, cat: 'Security', img: '🛡️', approved: true },
+      { seller: userIds[6], title: 'Database Backup Tool', titleAr: 'أداة النسخ الاحتياطي لقاعدة البيانات', desc: 'Automated backup system with incremental backups, compression, cloud upload, and failure alerts.', descAr: 'نظام نسخ احتياطي تلقائي مع نسخ تزايدي وضغط ورفع سحابي وتنبيهات الفشل.', price: 4.99, cat: 'Tools', img: '💾', approved: true },
+      { seller: userIds[4], title: 'Beginner Server Guide eBook', titleAr: 'كتاب إلكتروني دليل السيرفر للمبتدئين', desc: '120-page PDF guide covering everything from server setup to player management. Perfect for beginners.', descAr: 'دليل PDF من 120 صفحة يغطي كل شيء من إعداد السيرفر إلى إدارة اللاعبين. مثالي للمبتدئين.', price: 7.99, cat: 'Guides', img: '📖', approved: false },
+    ];
+
+    for (const p of sampleProducts) {
+      await db(
+        'INSERT INTO products (seller_id, title, title_ar, description, description_ar, price, category, image, is_approved) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)',
+        [p.seller, p.title, p.titleAr, p.desc, p.descAr, p.price, p.cat, p.img, p.approved]
+      );
+    }
+
+    // Add some product reviews
+    const approvedProducts = await db('SELECT id FROM products WHERE is_approved = TRUE LIMIT 7');
+    const reviewTexts = [
+      [5, "Excellent quality! Well worth the price."],
+      [4, "Good tool, works as described. Documentation could be better."],
+      [5, "This saved me weeks of work. Highly recommended!"],
+      [3, "Decent but had some compatibility issues with EP9.4."],
+      [5, "Perfect for beginners. Very well documented."],
+      [4, "Great value. The Discord integration works flawlessly."],
+    ];
+
+    for (let i = 0; i < Math.min(approvedProducts.rows.length, 6); i++) {
+      const prod = approvedProducts.rows[i];
+      const reviewerIdx = (i + 2) % userIds.length;
+      await db(
+        'INSERT INTO product_reviews (product_id, user_id, rating, comment) VALUES ($1,$2,$3,$4) ON CONFLICT DO NOTHING',
+        [prod.id, userIds[reviewerIdx], reviewTexts[i][0], reviewTexts[i][1]]
+      );
+      await db('UPDATE products SET average_rating = $1, total_sales = $2 WHERE id = $3',
+        [reviewTexts[i][0], Math.floor(Math.random() * 50) + 5, prod.id]);
+    }
+
+    console.log('✅ Sample data seeded!');
+    res.json({ message: 'Sample data created successfully', users: sampleUsers.length, threads: sampleThreads.length, products: sampleProducts.length });
+  } catch (e) {
+    console.error('Seed error:', e);
+    res.status(500).json({ error: 'Seeding failed: ' + e.message });
+  }
+});
+
 // Health check
 app.get('/api/health', (req, res) => {
   res.json({ status: 'ok', service: 'DevRoots API', timestamp: new Date().toISOString() });
