@@ -215,12 +215,20 @@ async function initDatabase() {
   if (parseInt(rows[0].count) === 0) {
     console.log('🌱 Seeding default forum categories...');
     const cats = [
-      ['Server Development', 'تطوير السيرفرات', 'server-dev', 'Game server setup, configuration, and optimization', 'إعداد وتكوين وتحسين سيرفرات اللعبة', '⚙️', 1],
-      ['Client Modding', 'تعديل العميل', 'client-mod', 'Client-side modifications, UI changes, and visual mods', 'تعديلات جانب العميل وتغييرات الواجهة والتعديلات البصرية', '🎨', 2],
-      ['Database & Tools', 'قواعد البيانات والأدوات', 'db-tools', 'Database management, custom tools, and utilities', 'إدارة قواعد البيانات والأدوات المخصصة والمرافق', '🗄️', 3],
-      ['Scripting & NPCs', 'البرمجة و NPCs', 'scripting', 'NPC scripting, quest creation, and game logic', 'برمجة NPCs وإنشاء المهام ومنطق اللعبة', '📜', 4],
-      ['Releases & Downloads', 'الإصدارات والتنزيلات', 'releases', 'Share your completed projects and releases', 'شارك مشاريعك المكتملة وإصداراتك', '📦', 5],
-      ['Help & Support', 'المساعدة والدعم', 'help', 'Get help with development issues and bugs', 'احصل على مساعدة في مشاكل التطوير والأخطاء', '🆘', 6],
+      // Administration & News
+      ['Platform Announcements', 'إعلانات المنصة', 'announcements', 'Official DevRoots news and updates', 'أخبار وتحديثات DevRoots الرسمية', '📢', 1],
+      ['Rules & Welcoming', 'القوانين والترحيب', 'rules-welcome', 'Space for new members and community guidelines', 'مساحة للأعضاء الجدد وإرشادات المجتمع', '👋', 2],
+      // Rappelz Development Hub
+      ['Core Development', 'التطوير الأساسي', 'core-dev', 'Server files, database integration, and performance optimization', 'ملفات السيرفر وتكامل قواعد البيانات وتحسين الأداء', '⚙️', 3],
+      ['Rendering & Graphics', 'الرسوميات والعرض', 'rendering', 'DX11 migration, client-side graphical edits, and shaders', 'ترحيل DX11 وتعديلات الرسوميات وتظليل العميل', '🎨', 4],
+      ['Scripting & Mechanics', 'البرمجة والميكانيكا', 'scripting', 'Lua scripts, XML files, and custom in-game logic', 'سكربتات Lua وملفات XML ومنطق اللعبة المخصص', '📜', 5],
+      ['User Interface (UI/UX)', 'واجهة المستخدم', 'ui-ux', 'Game interface modifications and styling', 'تعديلات واجهة اللعبة والتنسيق', '🖥️', 6],
+      // Creative & 3D Design
+      ['3D Modeling', 'النمذجة ثلاثية الأبعاد', '3d-modeling', 'Custom weapons, pets, and map assets', 'أسلحة مخصصة وحيوانات أليفة وأصول الخريطة', '🎭', 7],
+      ['2D Design', 'التصميم ثنائي الأبعاد', '2d-design', 'Logos, icons, and promotional banners', 'شعارات وأيقونات ولافتات ترويجية', '🖼️', 8],
+      // Tutorials & Support
+      ['Knowledge Base', 'قاعدة المعرفة', 'knowledge-base', 'Exclusive tutorials for beginners and advanced developers', 'دروس حصرية للمبتدئين والمطورين المتقدمين', '📚', 9],
+      ['Troubleshooting & Support', 'استكشاف الأخطاء والدعم', 'troubleshooting', 'Dedicated area for technical assistance and Q&A', 'منطقة مخصصة للمساعدة التقنية والأسئلة والأجوبة', '🆘', 10],
     ];
     for (const c of cats) {
       await db('INSERT INTO forum_categories (name, name_ar, slug, description, description_ar, icon, sort_order) VALUES ($1,$2,$3,$4,$5,$6,$7)', c);
@@ -282,7 +290,7 @@ function auth(req, res, next) {
 }
 
 function adminOnly(req, res, next) {
-  if (!['admin', 'moderator'].includes(req.user.role)) {
+  if (!['admin', 'tech-moderator', 'arch-developer'].includes(req.user.role)) {
     return res.status(403).json({ error: 'Admin access required' });
   }
   next();
@@ -734,7 +742,8 @@ app.put('/api/admin/users/:id/ban', auth, adminOnly, async (req, res) => {
 app.put('/api/admin/users/:id/role', auth, adminOnly, async (req, res) => {
   try {
     const { role } = req.body;
-    if (!['member', 'developer', 'moderator', 'admin'].includes(role)) return res.status(400).json({ error: 'Invalid role' });
+    const validRoles = ['member', 'junior-dev', 'script-master', 'systems-engineer', 'core-architect', 'arch-developer', 'creative-director', 'ui-ux-specialist', 'visual-artist', '3d-modeler', 'content-creator', 'tech-moderator', 'admin'];
+    if (!validRoles.includes(role)) return res.status(400).json({ error: 'Invalid role' });
     await db('UPDATE users SET role = $1 WHERE id = $2', [role, req.params.id]);
     await db('INSERT INTO admin_logs (admin_id, action, target_type, target_id, details) VALUES ($1,$2,$3,$4,$5)',
       [req.user.id, 'change_role', 'user', req.params.id, `Changed role to ${role}`]);
@@ -838,6 +847,32 @@ app.put('/api/notifications/read', auth, async (req, res) => {
 // ============================================================
 // SEED DATA — Call once to fill with sample data
 // ============================================================
+// Reset and re-seed categories
+app.post('/api/admin/reset-categories', auth, adminOnly, async (req, res) => {
+  try {
+    await db('DELETE FROM posts');
+    await db('DELETE FROM threads');
+    await db('DELETE FROM forum_categories');
+    // Re-seed
+    const cats = [
+      ['Platform Announcements', 'إعلانات المنصة', 'announcements', 'Official DevRoots news and updates', 'أخبار وتحديثات DevRoots الرسمية', '📢', 1],
+      ['Rules & Welcoming', 'القوانين والترحيب', 'rules-welcome', 'Space for new members and community guidelines', 'مساحة للأعضاء الجدد وإرشادات المجتمع', '👋', 2],
+      ['Core Development', 'التطوير الأساسي', 'core-dev', 'Server files, database integration, and performance optimization', 'ملفات السيرفر وتكامل قواعد البيانات وتحسين الأداء', '⚙️', 3],
+      ['Rendering & Graphics', 'الرسوميات والعرض', 'rendering', 'DX11 migration, client-side graphical edits, and shaders', 'ترحيل DX11 وتعديلات الرسوميات وتظليل العميل', '🎨', 4],
+      ['Scripting & Mechanics', 'البرمجة والميكانيكا', 'scripting', 'Lua scripts, XML files, and custom in-game logic', 'سكربتات Lua وملفات XML ومنطق اللعبة المخصص', '📜', 5],
+      ['User Interface (UI/UX)', 'واجهة المستخدم', 'ui-ux', 'Game interface modifications and styling', 'تعديلات واجهة اللعبة والتنسيق', '🖥️', 6],
+      ['3D Modeling', 'النمذجة ثلاثية الأبعاد', '3d-modeling', 'Custom weapons, pets, and map assets', 'أسلحة مخصصة وحيوانات أليفة وأصول الخريطة', '🎭', 7],
+      ['2D Design', 'التصميم ثنائي الأبعاد', '2d-design', 'Logos, icons, and promotional banners', 'شعارات وأيقونات ولافتات ترويجية', '🖼️', 8],
+      ['Knowledge Base', 'قاعدة المعرفة', 'knowledge-base', 'Exclusive tutorials for beginners and advanced developers', 'دروس حصرية للمبتدئين والمطورين المتقدمين', '📚', 9],
+      ['Troubleshooting & Support', 'استكشاف الأخطاء والدعم', 'troubleshooting', 'Dedicated area for technical assistance and Q&A', 'منطقة مخصصة للمساعدة التقنية والأسئلة والأجوبة', '🆘', 10],
+    ];
+    for (const c of cats) {
+      await db('INSERT INTO forum_categories (name, name_ar, slug, description, description_ar, icon, sort_order) VALUES ($1,$2,$3,$4,$5,$6,$7)', c);
+    }
+    res.json({ message: 'Categories reset with 10 new categories' });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 app.post('/api/admin/seed', auth, adminOnly, async (req, res) => {
   try {
     // Check if already seeded
@@ -850,14 +885,17 @@ app.post('/api/admin/seed', auth, adminOnly, async (req, res) => {
 
     // Create sample users
     const sampleUsers = [
-      ['NexusCraft', 'nexus@devroots.com', 'developer', '🧙', 'Full-stack dev specializing in Rappelz server emulation. Building custom content since 2018.', 1850],
-      ['ByteForge', 'byte@devroots.com', 'developer', '⚒️', 'Client modding expert. Texture packs, UI overhauls, and performance optimizations.', 1420],
-      ['ShadowScript', 'shadow@devroots.com', 'moderator', '🦊', 'Community moderator and NPC scripting enthusiast. Quest designer.', 2100],
-      ['RuneMaster', 'rune@devroots.com', 'developer', '🔮', 'Database architect. Building tools for Rappelz server management.', 980],
-      ['PhoenixDev', 'phoenix@devroots.com', 'member', '🐦', 'New to Rappelz development. Learning server setup and configuration.', 340],
-      ['CrystalByte', 'crystal@devroots.com', 'developer', '💎', 'Security researcher and anti-cheat developer for private servers.', 1650],
-      ['StormCoder', 'storm@devroots.com', 'member', '⚡', 'Python scripter working on automation tools for server management.', 520],
-      ['IronClad', 'iron@devroots.com', 'developer', '🛡️', 'Veteran developer. Running a private server community since 2015.', 3200],
+      ['NexusCraft', 'nexus@devroots.com', 'arch-developer', '🧙', 'Full-stack dev specializing in Rappelz server emulation. Building custom content since 2018.', 1850],
+      ['ByteForge', 'byte@devroots.com', 'core-architect', '⚒️', 'Database expert and server stability specialist. Performance optimization guru.', 1420],
+      ['ShadowScript', 'shadow@devroots.com', 'script-master', '🦊', 'NPC scripting enthusiast. Quest designer and Lua expert.', 2100],
+      ['RuneMaster', 'rune@devroots.com', 'systems-engineer', '🔮', 'Integration specialist. Linking Electron apps with the web platform.', 980],
+      ['PhoenixDev', 'phoenix@devroots.com', 'junior-dev', '🐦', 'New to Rappelz development. Learning server setup and configuration.', 340],
+      ['CrystalByte', 'crystal@devroots.com', 'ui-ux-specialist', '💎', 'UI/UX designer focused on React interfaces and game menus.', 1650],
+      ['StormCoder', 'storm@devroots.com', 'visual-artist', '⚡', 'Logo designer and banner artist. Creating visual identity for servers.', 520],
+      ['IronClad', 'iron@devroots.com', 'tech-moderator', '🛡️', 'Veteran moderator helping new developers in the community.', 3200],
+      ['ArtisanX', 'artisan@devroots.com', '3d-modeler', '🎭', 'Specialized in weapons, armor, and map terrain 3D models.', 1100],
+      ['NovaWriter', 'nova@devroots.com', 'content-creator', '📝', 'Technical writer creating tutorials and documentation.', 870],
+      ['VisionForge', 'vision@devroots.com', 'creative-director', '🎬', 'Overall artistic vision lead for game and website design.', 1950],
     ];
 
     const userIds = [];
@@ -887,49 +925,64 @@ app.post('/api/admin/seed', auth, adminOnly, async (req, res) => {
 
     // Create sample threads and posts
     const sampleThreads = [
-      { cat: 'server-dev', author: adminId, title: 'Complete Guide: Setting Up EP9.5 Server from Scratch', titleAr: 'دليل كامل: إعداد سيرفر EP9.5 من الصفر',
-        content: "Welcome to the definitive guide for setting up your own Rappelz EP9.5 server.\n\nPrerequisites:\n- Windows Server 2019+ or Ubuntu 22.04\n- MySQL 8.0 or MariaDB 10.6\n- .NET Framework 4.8\n- Minimum 8GB RAM, 4 cores\n\nStep 1: Database Setup\nFirst, create your database schema. Import the base SQL files from the release package.\n\nStep 2: Server Configuration\nEdit your server.ini file with your network settings. Make sure ports 4000-4010 are open.\n\nStep 3: Client Patching\nPatch your client data to match the server version.\n\nI'll be updating this guide regularly. Feel free to ask questions below!",
-        contentAr: "مرحباً بكم في الدليل الشامل لإعداد سيرفر رابلز EP9.5 الخاص بك.\n\nالمتطلبات:\n- ويندوز سيرفر 2019 أو أحدث أو أوبونتو 22.04\n- MySQL 8.0 أو MariaDB 10.6\n- .NET Framework 4.8\n- الحد الأدنى 8 جيجا رام و 4 أنوية\n\nسأقوم بتحديث هذا الدليل بانتظام. لا تتردد في طرح الأسئلة أدناه!",
+      { cat: 'announcements', author: adminId, title: 'Welcome to DevRoots — The Rappelz Developer Community', titleAr: 'مرحباً بكم في DevRoots — مجتمع مطوري رابلز',
+        content: "Welcome to DevRoots! This is the official platform for Rappelz private server development.\n\nHere you'll find:\n- Core development discussions\n- 3D modeling resources\n- Scripting tutorials\n- UI/UX design help\n\nPlease read the Rules & Welcoming section before posting.\n\nHappy developing!",
+        contentAr: "مرحباً بكم في DevRoots! هذه المنصة الرسمية لتطوير سيرفرات رابلز الخاصة.\n\nستجدون هنا:\n- نقاشات التطوير الأساسي\n- موارد النمذجة ثلاثية الأبعاد\n- دروس البرمجة\n- مساعدة تصميم الواجهات\n\nيرجى قراءة قسم القوانين والترحيب قبل النشر.\n\nتطوير سعيد!",
+        pinned: true, tags: ['welcome', 'official'] },
+      { cat: 'rules-welcome', author: adminId, title: 'Community Rules & Guidelines', titleAr: 'قوانين وإرشادات المجتمع',
+        content: "Community Rules:\n\n1. Be respectful to all members regardless of skill level\n2. No sharing of copyrighted Rappelz official content\n3. Credit original authors when sharing modified work\n4. Use English or Arabic — both are welcome\n5. No spam or self-promotion outside the Shop\n6. Report bugs responsibly\n7. Help others when you can\n\nViolations may result in warnings or bans.",
+        pinned: true, tags: ['rules', 'guidelines'] },
+
+      { cat: 'core-dev', author: userIds[0], title: 'Complete Guide: Setting Up EP9.5 Server from Scratch', titleAr: 'دليل كامل: إعداد سيرفر EP9.5 من الصفر',
+        content: "Welcome to the definitive guide for setting up your own Rappelz EP9.5 server.\n\nPrerequisites:\n- Windows Server 2019+ or Ubuntu 22.04\n- MySQL 8.0 or MariaDB 10.6\n- .NET Framework 4.8\n- Minimum 8GB RAM, 4 cores\n\nStep 1: Database Setup\nFirst, create your database schema.\n\nStep 2: Server Configuration\nEdit your server.ini with your network settings.\n\nStep 3: Client Patching\nPatch your client data to match the server version.\n\nI'll update this guide regularly!",
         pinned: true, tags: ['guide', 'ep9.5', 'setup'] },
-      { cat: 'server-dev', author: userIds[0], title: 'How to fix login server timeout issues', titleAr: 'كيفية إصلاح مشاكل انتهاء وقت سيرفر الدخول',
-        content: "Has anyone dealt with login server timeouts after EP9.5 migration?\n\nI'm getting consistent 30-second timeouts when players try to authenticate. The auth server logs show:\n\n[ERROR] Connection pool exhausted - max connections: 100\n\nI've tried:\n1. Increasing max_connections in MySQL\n2. Adding connection pooling via ProxySQL\n3. Optimizing the auth query\n\nNothing seems to work. Server specs: 16GB RAM, 8-core Xeon, SSD storage.\n\nAny ideas?",
-        tags: ['bug', 'login', 'timeout'] },
-      { cat: 'server-dev', author: userIds[7], title: 'Rate Limiting Best Practices for Private Servers', titleAr: 'أفضل ممارسات تحديد المعدل للسيرفرات الخاصة',
-        content: "After running a 500-player server for 3 years, here are my rate limiting recommendations:\n\n1. Login attempts: 5 per minute per IP\n2. Chat messages: 10 per 5 seconds\n3. Trade requests: 3 per minute\n4. Item drops: Server-side validation only\n\nI use a custom Redis-based rate limiter. Here's the basic architecture...\n\nHappy to share the full implementation if there's interest.",
-        tags: ['security', 'performance', 'guide'] },
+      { cat: 'core-dev', author: userIds[1], title: 'Database Performance Optimization for 500+ Players', titleAr: 'تحسين أداء قاعدة البيانات لأكثر من 500 لاعب',
+        content: "After running a 500-player server for 3 years, here are my optimization tips:\n\n1. Connection pooling with ProxySQL\n2. Query caching for frequently accessed data\n3. Index optimization on player tables\n4. Read replicas for non-critical queries\n5. Redis for session management\n\nBenchmarks and full config included below.",
+        tags: ['database', 'performance', 'optimization'] },
 
-      { cat: 'client-mod', author: userIds[1], title: 'HD Texture Pack v3.0 - Complete Overhaul Released!', titleAr: 'حزمة نسيج عالية الدقة v3.0 - إصدار الإصلاح الشامل!',
-        content: "After 6 months of work, I'm proud to release HD Texture Pack v3.0!\n\nWhat's included:\n- All terrain textures upscaled to 2048x2048\n- Character textures redrawn at 4K resolution\n- New particle effects for skills\n- Optimized for minimal FPS impact\n\nBefore/After screenshots attached in the download.\n\nDownload from the shop or check the releases section.\n\nPlease report any visual glitches!",
-        pinned: true, tags: ['textures', 'hd', 'release'] },
-      { cat: 'client-mod', author: userIds[5], title: 'Custom UI Framework - Make Your Own Interface', titleAr: 'إطار واجهة مخصص - صمم واجهتك الخاصة',
-        content: "I've built a modular UI framework that lets you completely redesign the Rappelz client interface.\n\nFeatures:\n- Drag-and-drop UI editor\n- Custom color themes\n- Resizable windows\n- XML-based layout system\n- Hot-reload support\n\nThe framework hooks into the client's rendering pipeline without modifying core files.\n\nDocumentation: https://github.com/crystalbyte/rappelz-ui-framework",
-        tags: ['ui', 'framework', 'modding'] },
+      { cat: 'rendering', author: userIds[3], title: 'DX11 Migration Progress Report — Month 3', titleAr: 'تقرير تقدم ترحيل DX11 — الشهر الثالث',
+        content: "Progress update on the DX9 to DX11 migration project:\n\nCompleted:\n- Shader compilation pipeline\n- Basic terrain rendering\n- Character model loading\n\nIn Progress:\n- Particle effects system\n- Shadow mapping\n- Water reflections\n\nWe need help with the particle system. Any graphics programmers interested?",
+        tags: ['dx11', 'graphics', 'migration'] },
 
-      { cat: 'db-tools', author: userIds[3], title: 'ServerMonitor v2.0 - Real-time Dashboard for Your Server', titleAr: 'ServerMonitor v2.0 - لوحة مراقبة في الوقت الحقيقي لسيرفرك',
-        content: "Introducing ServerMonitor v2.0 - a web-based dashboard for monitoring your Rappelz server.\n\nFeatures:\n- Real-time player count\n- CPU/RAM/Disk usage graphs\n- Active session tracking\n- Error log aggregation\n- Automated alerts (Discord/Email)\n- Database query performance\n\nBuilt with Node.js + React + WebSockets.\n\nFree for servers under 100 players, premium license for larger servers.\n\nCheck it out in the shop!",
-        tags: ['monitoring', 'dashboard', 'tool'] },
-      { cat: 'db-tools', author: userIds[6], title: 'Python script for automated database backups', titleAr: 'سكربت بايثون للنسخ الاحتياطي التلقائي لقاعدة البيانات',
-        content: "Sharing my backup automation script that I use on my server.\n\nWhat it does:\n- Full database dump every 6 hours\n- Incremental backups every hour\n- Automatic compression (saves 70% space)\n- Upload to S3/Google Drive\n- Keeps last 30 days of backups\n- Email notification on failure\n\nRequires: Python 3.8+, mysqldump, cron\n\nFull source code below. MIT licensed.",
-        tags: ['python', 'backup', 'automation'] },
-
-      { cat: 'scripting', author: userIds[2], title: 'NPC Scripting Tutorial Series - Part 1: Basics', titleAr: 'سلسلة دروس برمجة NPC - الجزء 1: الأساسيات',
-        content: "Starting a comprehensive NPC scripting tutorial series!\n\nPart 1 covers:\n- Understanding the NPC script structure\n- Basic dialog trees\n- Item shop NPCs\n- Quest givers (simple fetch quests)\n- Teleport NPCs\n\nEach example includes the full script with line-by-line explanations.\n\nI'll be posting a new part every week covering increasingly complex topics.\n\nPart 2 will cover: Conditional logic, player checks, and timed events.",
+      { cat: 'scripting', author: userIds[2], title: 'NPC Scripting Tutorial Series — Part 1: Basics', titleAr: 'سلسلة دروس برمجة NPC — الجزء 1: الأساسيات',
+        content: "Starting a comprehensive NPC scripting tutorial series!\n\nPart 1 covers:\n- Understanding the NPC script structure\n- Basic dialog trees\n- Item shop NPCs\n- Quest givers (simple fetch quests)\n- Teleport NPCs\n\nEach example includes the full script with line-by-line explanations.",
         pinned: true, tags: ['tutorial', 'npc', 'scripting'] },
-      { cat: 'scripting', author: userIds[2], title: 'Custom Boss AI - Making Fights Interesting', titleAr: 'ذكاء اصطناعي مخصص للبوس - جعل المعارك ممتعة',
-        content: "Generic boss fights are boring. Here's how to create dynamic boss encounters.\n\nPhase-based system:\n- Phase 1 (100-70% HP): Normal attacks + random skill rotation\n- Phase 2 (70-40% HP): New skills unlock, aggro table manipulation\n- Phase 3 (40-0% HP): Enrage, AoE spam, add spawning\n\nKey techniques:\n1. Timer-based skill queuing\n2. HP threshold triggers\n3. Player proximity checks\n4. Random target selection\n\nExample script for a 3-phase dragon boss included.",
+      { cat: 'scripting', author: userIds[2], title: 'Custom Boss AI — Making Fights Interesting', titleAr: 'ذكاء اصطناعي مخصص للبوس — جعل المعارك ممتعة',
+        content: "Generic boss fights are boring. Here's how to create dynamic encounters.\n\nPhase-based system:\n- Phase 1 (100-70% HP): Normal attacks\n- Phase 2 (70-40% HP): New skills unlock\n- Phase 3 (40-0% HP): Enrage mode\n\nExample script for a 3-phase dragon boss included.",
         tags: ['boss', 'ai', 'advanced'] },
 
-      { cat: 'releases', author: userIds[7], title: '[Release] EP9.5 Full Server Package - Ready to Deploy', titleAr: '[إصدار] حزمة سيرفر EP9.5 كاملة - جاهزة للنشر',
+      { cat: 'ui-ux', author: userIds[5], title: 'Custom UI Framework — Make Your Own Interface', titleAr: 'إطار واجهة مخصص — صمم واجهتك الخاصة',
+        content: "I've built a modular UI framework for the Rappelz client interface.\n\nFeatures:\n- Drag-and-drop UI editor\n- Custom color themes\n- Resizable windows\n- XML-based layout system\n- Hot-reload support\n\nDocumentation and source code on GitHub.",
+        tags: ['ui', 'framework', 'modding'] },
+
+      { cat: '3d-modeling', author: userIds[8], title: 'Custom Weapon Models Pack — 20+ Swords & Axes', titleAr: 'حزمة نماذج أسلحة مخصصة — 20+ سيوف وفؤوس',
+        content: "Releasing my custom weapon pack with 20+ hand-crafted models.\n\nIncludes:\n- 10 unique sword designs\n- 5 axe variants\n- 3 staff models\n- 2 bow designs\n\nAll models are game-ready with UV mapping and textures. Blender source files included.",
+        tags: ['3d', 'weapons', 'release'] },
+
+      { cat: '2d-design', author: userIds[6], title: 'DevRoots Logo Design Process & Assets', titleAr: 'عملية تصميم شعار DevRoots والأصول',
+        content: "Sharing the design process behind the DevRoots brand identity.\n\nDesign principles:\n- Tree represents organic growth\n- Circuit roots represent technology\n- Green + Amber color palette\n\nFree to use for community projects. Source files (SVG, AI, PNG) available.",
+        tags: ['logo', 'branding', 'design'] },
+
+      { cat: 'knowledge-base', author: userIds[9], title: 'Beginner Guide: Your First Week in Rappelz Development', titleAr: 'دليل المبتدئين: أسبوعك الأول في تطوير رابلز',
+        content: "New to Rappelz development? Here's your roadmap:\n\nDay 1-2: Set up your development environment\nDay 3-4: Understand the server architecture\nDay 5: Make your first NPC edit\nDay 6: Create a simple quest\nDay 7: Deploy a test server\n\nEach day has step-by-step instructions with screenshots.",
+        pinned: true, tags: ['beginner', 'guide', 'tutorial'] },
+
+      { cat: 'troubleshooting', author: userIds[4], title: 'Server crashes when more than 50 players online', titleAr: 'السيرفر يتوقف عند وجود أكثر من 50 لاعب',
+        content: "My server consistently crashes when player count exceeds 50.\n\nSpecs: 16GB RAM, 8-core CPU, SSD\nOS: Ubuntu 22.04\nError logs show memory allocation failures.\n\nI've tried increasing swap space and adjusting thread pool size but no luck.\n\nAnyone experienced this? What was your solution?",
+        tags: ['crash', 'performance', 'help'] },
+    ];
+
+      { cat: 'knowledge-base', author: userIds[7], title: '[Release] EP9.5 Full Server Package — Ready to Deploy', titleAr: '[إصدار] حزمة سيرفر EP9.5 كاملة — جاهزة للنشر',
         content: "Releasing my complete EP9.5 server package for the community.\n\nIncludes:\n- Pre-configured server binaries\n- Complete database with all items/skills/maps\n- Launcher with auto-updater\n- Basic anti-cheat module\n- Setup documentation\n- Docker compose file for easy deployment\n\nTested on Windows Server 2022 and Ubuntu 22.04.\n\nPlease credit if you use this as a base for your server.\n\nReport issues in the Help section.",
         tags: ['ep9.5', 'server-files', 'release'] },
-      { cat: 'releases', author: userIds[1], title: '[Release] Custom Launcher with Discord Integration', titleAr: '[إصدار] لانشر مخصص مع تكامل ديسكورد',
+      { cat: 'core-dev', author: userIds[1], title: '[Release] Custom Launcher with Discord Integration', titleAr: '[إصدار] لانشر مخصص مع تكامل ديسكورد',
         content: "New custom launcher release!\n\nFeatures:\n- Modern dark UI with server branding\n- Discord Rich Presence\n- Auto-patch system with progress bar\n- Server status indicator\n- News feed from your website\n- Multi-language support\n\nBuilt with Electron. Fully customizable.\n\nSource code available on GitHub.",
         tags: ['launcher', 'discord', 'electron'] },
 
-      { cat: 'help', author: userIds[4], title: 'Server crashes when more than 50 players online', titleAr: 'السيرفر يتوقف عند وجود أكثر من 50 لاعب',
+      { cat: 'troubleshooting', author: userIds[4], title: 'Server crashes when more than 50 players online', titleAr: 'السيرفر يتوقف عند وجود أكثر من 50 لاعب',
         content: "Hi everyone, I'm new to server development and having a critical issue.\n\nMy server runs fine with under 50 players, but consistently crashes when we hit 50+.\n\nError log shows:\n[FATAL] Memory allocation failed - heap size exceeded\n\nServer specs:\n- Windows 10 (not server edition)\n- 8GB RAM\n- i5-10400\n- MySQL on same machine\n\nI've set the heap size to 4GB but it still crashes. Any help appreciated!",
         tags: ['crash', 'memory', 'help-needed'] },
-      { cat: 'help', author: userIds[6], title: 'How to compile client from source?', titleAr: 'كيف أقوم بتجميع العميل من المصدر؟',
+      { cat: 'troubleshooting', author: userIds[6], title: 'How to compile client from source?', titleAr: 'كيف أقوم بتجميع العميل من المصدر؟',
         content: "I have the client source code but I'm struggling to compile it.\n\nGetting these errors:\n- Missing DirectX SDK headers\n- Linker errors for boost libraries\n- Unknown pragma warnings\n\nI'm using Visual Studio 2022 on Windows 11.\n\nHas anyone successfully compiled the client recently? What SDK versions do I need?\n\nThanks in advance!",
         tags: ['compile', 'client', 'help-needed'] },
     ];
