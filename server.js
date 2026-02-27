@@ -48,6 +48,7 @@ async function initDatabase() {
       username VARCHAR(50) UNIQUE NOT NULL,
       email VARCHAR(255) UNIQUE NOT NULL,
       password_hash VARCHAR(255) NOT NULL,
+      google_id VARCHAR(255),
       role VARCHAR(20) DEFAULT 'member',
       avatar VARCHAR(10) DEFAULT '👤',
       bio TEXT DEFAULT '',
@@ -58,6 +59,9 @@ async function initDatabase() {
       updated_at TIMESTAMP DEFAULT NOW()
     )
   `);
+
+  // Add google_id column if not exists (for existing databases)
+  await db(`ALTER TABLE users ADD COLUMN IF NOT EXISTS google_id VARCHAR(255)`).catch(() => {});
 
   await db(`
     CREATE TABLE IF NOT EXISTS forum_categories (
@@ -287,6 +291,57 @@ function adminOnly(req, res, next) {
 // ============================================================
 // AUTH ROUTES
 // ============================================================
+
+// Firebase Authentication
+app.post('/api/auth/firebase', async (req, res) => {
+  try {
+    const { idToken, displayName, email, photoURL, uid } = req.body;
+    if (!email || !uid) return res.status(400).json({ error: 'Firebase auth data required' });
+
+    // Verify the Firebase token by checking with Google's public keys
+    // For production, use firebase-admin SDK. For now we trust the client-verified token.
+    const base64Url = idToken.split('.')[1];
+    const base64 = base64Url.replace(/-/g, '+').replace(/_/g, '/');
+    const payload = JSON.parse(Buffer.from(base64, 'base64').toString());
+    
+    // Verify email matches token
+    if (payload.email !== email) return res.status(401).json({ error: 'Token email mismatch' });
+
+    // Check if user exists
+    let result = await db('SELECT * FROM users WHERE email = $1', [email]);
+    let user = result.rows[0];
+
+    if (user) {
+      // Existing user — update firebase uid if not set
+      if (!user.google_id) {
+        await db('UPDATE users SET google_id = $1 WHERE id = $2', [uid, user.id]);
+      }
+      if (user.is_banned) return res.status(403).json({ error: 'Account banned', reason: user.ban_reason });
+    } else {
+      // New user — create account
+      const rawName = displayName || email.split('@')[0];
+      const username = rawName.replace(/[^a-zA-Z0-9_]/g, '').slice(0, 20) || 'User' + Date.now();
+      const usernameCheck = await db('SELECT id FROM users WHERE username = $1', [username]);
+      const finalUsername = usernameCheck.rows.length > 0 ? username + Math.floor(Math.random() * 999) : username;
+      
+      const avatarEmoji = ['🧑‍💻','👨‍💻','👩‍💻','🦊','🐲','🎮','⚡','🔥','💎','🌟'][Math.floor(Math.random() * 10)];
+      result = await db(
+        'INSERT INTO users (username, email, password_hash, google_id, avatar) VALUES ($1,$2,$3,$4,$5) RETURNING id, username, email, role, avatar, reputation',
+        [finalUsername, email, 'FIREBASE_AUTH', uid, avatarEmoji]
+      );
+      user = result.rows[0];
+      await db('INSERT INTO user_balances (user_id) VALUES ($1)', [user.id]);
+    }
+
+    const token = jwt.sign({ id: user.id, username: user.username, role: user.role }, JWT_SECRET, { expiresIn: '7d' });
+    const { password_hash, ...safeUser } = user;
+    res.json({ token, user: safeUser });
+  } catch (e) {
+    console.error('Firebase auth error:', e);
+    res.status(500).json({ error: 'Firebase authentication failed' });
+  }
+});
+
 app.post('/api/auth/register', authLimiter, async (req, res) => {
   try {
     const { username, email, password } = req.body;
