@@ -210,6 +210,43 @@ async function initDatabase() {
     )
   `);
 
+  // Direct Messages
+  await db(`
+    CREATE TABLE IF NOT EXISTS messages (
+      id SERIAL PRIMARY KEY,
+      sender_id INTEGER REFERENCES users(id),
+      receiver_id INTEGER REFERENCES users(id),
+      content TEXT NOT NULL,
+      is_read BOOLEAN DEFAULT FALSE,
+      created_at TIMESTAMP DEFAULT NOW()
+    )
+  `);
+
+  // Support Tickets
+  await db(`
+    CREATE TABLE IF NOT EXISTS tickets (
+      id SERIAL PRIMARY KEY,
+      user_id INTEGER REFERENCES users(id),
+      subject VARCHAR(255) NOT NULL,
+      category VARCHAR(50) DEFAULT 'general',
+      priority VARCHAR(20) DEFAULT 'normal',
+      status VARCHAR(20) DEFAULT 'open',
+      created_at TIMESTAMP DEFAULT NOW(),
+      updated_at TIMESTAMP DEFAULT NOW()
+    )
+  `);
+
+  await db(`
+    CREATE TABLE IF NOT EXISTS ticket_replies (
+      id SERIAL PRIMARY KEY,
+      ticket_id INTEGER REFERENCES tickets(id),
+      user_id INTEGER REFERENCES users(id),
+      content TEXT NOT NULL,
+      is_staff BOOLEAN DEFAULT FALSE,
+      created_at TIMESTAMP DEFAULT NOW()
+    )
+  `);
+
   // Seed default categories
   const { rows } = await db('SELECT COUNT(*) as count FROM forum_categories');
   if (parseInt(rows[0].count) === 0) {
@@ -1101,6 +1138,219 @@ app.post('/api/admin/seed', auth, adminOnly, async (req, res) => {
 });
 
 // Health check
+// ============================================================
+// DIRECT MESSAGES
+// ============================================================
+
+// Get conversations list (unique users you've chatted with)
+app.get('/api/messages/conversations', auth, async (req, res) => {
+  try {
+    const result = await db(`
+      SELECT DISTINCT ON (other_id) other_id, other_name, other_avatar, other_role, last_msg, last_time, unread_count
+      FROM (
+        SELECT 
+          CASE WHEN m.sender_id = $1 THEN m.receiver_id ELSE m.sender_id END as other_id,
+          CASE WHEN m.sender_id = $1 THEN r.username ELSE s.username END as other_name,
+          CASE WHEN m.sender_id = $1 THEN r.avatar ELSE s.avatar END as other_avatar,
+          CASE WHEN m.sender_id = $1 THEN r.role ELSE s.role END as other_role,
+          m.content as last_msg,
+          m.created_at as last_time,
+          CASE WHEN m.receiver_id = $1 AND m.is_read = FALSE THEN 1 ELSE 0 END as unread_count
+        FROM messages m
+        JOIN users s ON m.sender_id = s.id
+        JOIN users r ON m.receiver_id = r.id
+        WHERE m.sender_id = $1 OR m.receiver_id = $1
+        ORDER BY CASE WHEN m.sender_id = $1 THEN m.receiver_id ELSE m.sender_id END, m.created_at DESC
+      ) sub
+      ORDER BY other_id, last_time DESC
+    `, [req.user.id]);
+    
+    // Get real unread counts
+    const convos = [];
+    for (const row of result.rows) {
+      const unread = await db('SELECT COUNT(*) as count FROM messages WHERE sender_id = $1 AND receiver_id = $2 AND is_read = FALSE', [row.other_id, req.user.id]);
+      convos.push({ ...row, unread_count: parseInt(unread.rows[0].count) });
+    }
+    convos.sort((a, b) => new Date(b.last_time) - new Date(a.last_time));
+    res.json(convos);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Get messages with a specific user
+app.get('/api/messages/:userId', auth, async (req, res) => {
+  try {
+    const otherId = parseInt(req.params.userId);
+    // Mark messages as read
+    await db('UPDATE messages SET is_read = TRUE WHERE sender_id = $1 AND receiver_id = $2 AND is_read = FALSE', [otherId, req.user.id]);
+    
+    const result = await db(`
+      SELECT m.*, s.username as sender_name, s.avatar as sender_avatar, s.role as sender_role
+      FROM messages m
+      JOIN users s ON m.sender_id = s.id
+      WHERE (m.sender_id = $1 AND m.receiver_id = $2) OR (m.sender_id = $2 AND m.receiver_id = $1)
+      ORDER BY m.created_at ASC
+      LIMIT 100
+    `, [req.user.id, otherId]);
+    res.json(result.rows);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Send a message
+app.post('/api/messages/:userId', auth, async (req, res) => {
+  try {
+    const receiverId = parseInt(req.params.userId);
+    const { content } = req.body;
+    if (!content || !content.trim()) return res.status(400).json({ error: 'Message cannot be empty' });
+    
+    // Check receiver exists
+    const receiver = await db('SELECT id, username FROM users WHERE id = $1', [receiverId]);
+    if (receiver.rows.length === 0) return res.status(404).json({ error: 'User not found' });
+    
+    const result = await db(
+      'INSERT INTO messages (sender_id, receiver_id, content) VALUES ($1, $2, $3) RETURNING *',
+      [req.user.id, receiverId, content.trim()]
+    );
+    
+    // Create notification for receiver
+    await db('INSERT INTO notifications (user_id, type, message, message_ar) VALUES ($1, $2, $3, $4)',
+      [receiverId, 'message', `New message from ${req.user.username}`, `رسالة جديدة من ${req.user.username}`]);
+    
+    res.status(201).json(result.rows[0]);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Get unread message count
+app.get('/api/messages-unread', auth, async (req, res) => {
+  try {
+    const result = await db('SELECT COUNT(*) as count FROM messages WHERE receiver_id = $1 AND is_read = FALSE', [req.user.id]);
+    res.json({ count: parseInt(result.rows[0].count) });
+  } catch (e) { res.json({ count: 0 }); }
+});
+
+// Search users to start a conversation
+app.get('/api/users/search', auth, async (req, res) => {
+  try {
+    const q = req.query.q || '';
+    if (q.length < 2) return res.json([]);
+    const result = await db(
+      "SELECT id, username, avatar, role FROM users WHERE username ILIKE $1 AND id != $2 LIMIT 10",
+      [`%${q}%`, req.user.id]
+    );
+    res.json(result.rows);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// ============================================================
+// SUPPORT TICKETS
+// ============================================================
+
+// Create a ticket
+app.post('/api/tickets', auth, async (req, res) => {
+  try {
+    const { subject, category, priority, content } = req.body;
+    if (!subject || !content) return res.status(400).json({ error: 'Subject and description required' });
+    
+    const ticket = await db(
+      'INSERT INTO tickets (user_id, subject, category, priority) VALUES ($1, $2, $3, $4) RETURNING *',
+      [req.user.id, subject, category || 'general', priority || 'normal']
+    );
+    
+    // Add first message as ticket reply
+    await db('INSERT INTO ticket_replies (ticket_id, user_id, content, is_staff) VALUES ($1, $2, $3, FALSE)',
+      [ticket.rows[0].id, req.user.id, content]);
+    
+    res.status(201).json(ticket.rows[0]);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Get my tickets (or all tickets for admin)
+app.get('/api/tickets', auth, async (req, res) => {
+  try {
+    const isAdmin = ['admin', 'tech-moderator', 'arch-developer'].includes(req.user.role);
+    const query = isAdmin
+      ? `SELECT t.*, u.username, u.avatar, u.role as user_role,
+           (SELECT COUNT(*) FROM ticket_replies tr WHERE tr.ticket_id = t.id) as reply_count
+         FROM tickets t JOIN users u ON t.user_id = u.id ORDER BY 
+         CASE WHEN t.status = 'open' THEN 0 WHEN t.status = 'in-progress' THEN 1 ELSE 2 END, t.updated_at DESC`
+      : `SELECT t.*, u.username, u.avatar,
+           (SELECT COUNT(*) FROM ticket_replies tr WHERE tr.ticket_id = t.id) as reply_count
+         FROM tickets t JOIN users u ON t.user_id = u.id WHERE t.user_id = $1 ORDER BY t.updated_at DESC`;
+    
+    const result = isAdmin ? await db(query) : await db(query, [req.user.id]);
+    res.json(result.rows);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Get single ticket with replies
+app.get('/api/tickets/:id', auth, async (req, res) => {
+  try {
+    const ticket = await db(
+      `SELECT t.*, u.username, u.avatar, u.role as user_role FROM tickets t JOIN users u ON t.user_id = u.id WHERE t.id = $1`,
+      [req.params.id]
+    );
+    if (ticket.rows.length === 0) return res.status(404).json({ error: 'Ticket not found' });
+    
+    const isAdmin = ['admin', 'tech-moderator', 'arch-developer'].includes(req.user.role);
+    if (!isAdmin && ticket.rows[0].user_id !== req.user.id) return res.status(403).json({ error: 'Access denied' });
+    
+    const replies = await db(
+      `SELECT tr.*, u.username, u.avatar, u.role FROM ticket_replies tr JOIN users u ON tr.user_id = u.id WHERE tr.ticket_id = $1 ORDER BY tr.created_at ASC`,
+      [req.params.id]
+    );
+    
+    res.json({ ticket: ticket.rows[0], replies: replies.rows });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Reply to a ticket
+app.post('/api/tickets/:id/reply', auth, async (req, res) => {
+  try {
+    const { content } = req.body;
+    if (!content) return res.status(400).json({ error: 'Reply cannot be empty' });
+    
+    const ticket = await db('SELECT * FROM tickets WHERE id = $1', [req.params.id]);
+    if (ticket.rows.length === 0) return res.status(404).json({ error: 'Ticket not found' });
+    
+    const isAdmin = ['admin', 'tech-moderator', 'arch-developer'].includes(req.user.role);
+    if (!isAdmin && ticket.rows[0].user_id !== req.user.id) return res.status(403).json({ error: 'Access denied' });
+    
+    const reply = await db(
+      'INSERT INTO ticket_replies (ticket_id, user_id, content, is_staff) VALUES ($1, $2, $3, $4) RETURNING *',
+      [req.params.id, req.user.id, content, isAdmin]
+    );
+    
+    // Update ticket timestamp and status
+    const newStatus = isAdmin ? 'in-progress' : ticket.rows[0].status;
+    await db('UPDATE tickets SET updated_at = NOW(), status = $1 WHERE id = $2', [newStatus, req.params.id]);
+    
+    // Notify the other party
+    const notifyUserId = isAdmin ? ticket.rows[0].user_id : null;
+    if (notifyUserId) {
+      await db('INSERT INTO notifications (user_id, type, message, message_ar) VALUES ($1, $2, $3, $4)',
+        [notifyUserId, 'ticket', `Staff replied to your ticket: ${ticket.rows[0].subject}`, `رد الدعم على تذكرتك: ${ticket.rows[0].subject}`]);
+    }
+    
+    res.status(201).json(reply.rows[0]);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Update ticket status (admin only)
+app.put('/api/tickets/:id/status', auth, adminOnly, async (req, res) => {
+  try {
+    const { status } = req.body;
+    if (!['open', 'in-progress', 'resolved', 'closed'].includes(status)) return res.status(400).json({ error: 'Invalid status' });
+    await db('UPDATE tickets SET status = $1, updated_at = NOW() WHERE id = $2', [status, req.params.id]);
+    
+    const ticket = await db('SELECT user_id, subject FROM tickets WHERE id = $1', [req.params.id]);
+    if (ticket.rows[0]) {
+      await db('INSERT INTO notifications (user_id, type, message, message_ar) VALUES ($1, $2, $3, $4)',
+        [ticket.rows[0].user_id, 'ticket', `Ticket "${ticket.rows[0].subject}" status: ${status}`, `حالة التذكرة "${ticket.rows[0].subject}": ${status}`]);
+    }
+    
+    res.json({ message: 'Status updated' });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 // Public stats (no auth required)
 app.get('/api/stats/public', async (req, res) => {
   try {
