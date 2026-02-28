@@ -1252,6 +1252,63 @@ app.get('/api/users/search', auth, async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+// Public user profile
+app.get('/api/users/:id/profile', async (req, res) => {
+  try {
+    const user = await db(
+      `SELECT id, username, avatar, role, bio, reputation, created_at FROM users WHERE id = $1 AND is_banned = FALSE`,
+      [req.params.id]
+    );
+    if (user.rows.length === 0) return res.status(404).json({ error: 'User not found' });
+
+    // Get stats
+    const threads = await db('SELECT COUNT(*) as count FROM threads WHERE author_id = $1 AND is_deleted = FALSE', [req.params.id]);
+    const posts = await db('SELECT COUNT(*) as count FROM posts WHERE author_id = $1 AND is_deleted = FALSE', [req.params.id]);
+    const friends = await db("SELECT COUNT(*) as count FROM friendships WHERE (sender_id = $1 OR receiver_id = $1) AND status = 'accepted'", [req.params.id]);
+
+    res.json({
+      ...user.rows[0],
+      thread_count: parseInt(threads.rows[0].count),
+      post_count: parseInt(posts.rows[0].count),
+      friend_count: parseInt(friends.rows[0].count),
+    });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Update avatar
+app.put('/api/auth/avatar', auth, async (req, res) => {
+  try {
+    const { avatar } = req.body;
+    if (!avatar) return res.status(400).json({ error: 'Avatar required' });
+    await db('UPDATE users SET avatar = $1 WHERE id = $2', [avatar, req.user.id]);
+    res.json({ avatar, message: 'Avatar updated' });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Update profile (username, bio, avatar)
+app.put('/api/auth/profile', auth, async (req, res) => {
+  try {
+    const { username, bio, avatar } = req.body;
+    if (username) {
+      // Check unique
+      const existing = await db('SELECT id FROM users WHERE username = $1 AND id != $2', [username, req.user.id]);
+      if (existing.rows.length > 0) return res.status(400).json({ error: 'Username already taken' });
+    }
+    const updates = [];
+    const values = [];
+    let idx = 1;
+    if (username) { updates.push(`username = $${idx++}`); values.push(username); }
+    if (bio !== undefined) { updates.push(`bio = $${idx++}`); values.push(bio); }
+    if (avatar) { updates.push(`avatar = $${idx++}`); values.push(avatar); }
+    if (updates.length === 0) return res.status(400).json({ error: 'Nothing to update' });
+    values.push(req.user.id);
+    await db(`UPDATE users SET ${updates.join(', ')} WHERE id = $${idx}`, values);
+    
+    const updated = await db('SELECT id, username, email, role, avatar, bio, reputation FROM users WHERE id = $1', [req.user.id]);
+    res.json(updated.rows[0]);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 // ============================================================
 // SUPPORT TICKETS
 // ============================================================
