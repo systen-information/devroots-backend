@@ -247,6 +247,18 @@ async function initDatabase() {
     )
   `);
 
+  // Friendships
+  await db(`
+    CREATE TABLE IF NOT EXISTS friendships (
+      id SERIAL PRIMARY KEY,
+      sender_id INTEGER REFERENCES users(id),
+      receiver_id INTEGER REFERENCES users(id),
+      status VARCHAR(20) DEFAULT 'pending',
+      created_at TIMESTAMP DEFAULT NOW(),
+      UNIQUE(sender_id, receiver_id)
+    )
+  `);
+
   // Seed default categories
   const { rows } = await db('SELECT COUNT(*) as count FROM forum_categories');
   if (parseInt(rows[0].count) === 0) {
@@ -1349,6 +1361,142 @@ app.put('/api/tickets/:id/status', auth, adminOnly, async (req, res) => {
     
     res.json({ message: 'Status updated' });
   } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// ============================================================
+// FRIENDS SYSTEM
+// ============================================================
+
+// Send friend request
+app.post('/api/friends/request/:userId', auth, async (req, res) => {
+  try {
+    const receiverId = parseInt(req.params.userId);
+    if (receiverId === req.user.id) return res.status(400).json({ error: 'Cannot add yourself' });
+
+    // Check receiver exists
+    const receiver = await db('SELECT id, username FROM users WHERE id = $1', [receiverId]);
+    if (receiver.rows.length === 0) return res.status(404).json({ error: 'User not found' });
+
+    // Check if already friends or pending
+    const existing = await db(
+      'SELECT * FROM friendships WHERE (sender_id=$1 AND receiver_id=$2) OR (sender_id=$2 AND receiver_id=$1)',
+      [req.user.id, receiverId]
+    );
+    if (existing.rows.length > 0) {
+      const f = existing.rows[0];
+      if (f.status === 'accepted') return res.status(400).json({ error: 'Already friends' });
+      if (f.status === 'pending') return res.status(400).json({ error: 'Request already pending' });
+      if (f.status === 'declined') {
+        // Allow re-request after decline
+        await db('DELETE FROM friendships WHERE id = $1', [f.id]);
+      }
+    }
+
+    await db('INSERT INTO friendships (sender_id, receiver_id, status) VALUES ($1, $2, $3)',
+      [req.user.id, receiverId, 'pending']);
+
+    // Notify receiver
+    await db('INSERT INTO notifications (user_id, type, message, message_ar) VALUES ($1, $2, $3, $4)',
+      [receiverId, 'friend_request', `${req.user.username} sent you a friend request`, `${req.user.username} أرسل لك طلب صداقة`]);
+
+    res.status(201).json({ message: 'Friend request sent' });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Accept friend request
+app.put('/api/friends/accept/:userId', auth, async (req, res) => {
+  try {
+    const senderId = parseInt(req.params.userId);
+    const result = await db(
+      "UPDATE friendships SET status = 'accepted' WHERE sender_id = $1 AND receiver_id = $2 AND status = 'pending' RETURNING *",
+      [senderId, req.user.id]
+    );
+    if (result.rows.length === 0) return res.status(404).json({ error: 'No pending request found' });
+
+    // Notify sender
+    const sender = await db('SELECT username FROM users WHERE id = $1', [senderId]);
+    await db('INSERT INTO notifications (user_id, type, message, message_ar) VALUES ($1, $2, $3, $4)',
+      [senderId, 'friend_accepted', `${req.user.username} accepted your friend request!`, `${req.user.username} قبل طلب صداقتك!`]);
+
+    res.json({ message: 'Friend request accepted' });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Decline friend request
+app.put('/api/friends/decline/:userId', auth, async (req, res) => {
+  try {
+    const senderId = parseInt(req.params.userId);
+    await db(
+      "UPDATE friendships SET status = 'declined' WHERE sender_id = $1 AND receiver_id = $2 AND status = 'pending'",
+      [senderId, req.user.id]
+    );
+    res.json({ message: 'Friend request declined' });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Remove friend
+app.delete('/api/friends/:userId', auth, async (req, res) => {
+  try {
+    const otherId = parseInt(req.params.userId);
+    await db(
+      "DELETE FROM friendships WHERE (sender_id=$1 AND receiver_id=$2) OR (sender_id=$2 AND receiver_id=$1)",
+      [req.user.id, otherId]
+    );
+    res.json({ message: 'Friend removed' });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Get my friends list
+app.get('/api/friends', auth, async (req, res) => {
+  try {
+    const result = await db(`
+      SELECT u.id, u.username, u.avatar, u.role, u.bio, f.created_at as friends_since
+      FROM friendships f
+      JOIN users u ON (CASE WHEN f.sender_id = $1 THEN f.receiver_id ELSE f.sender_id END) = u.id
+      WHERE (f.sender_id = $1 OR f.receiver_id = $1) AND f.status = 'accepted'
+      ORDER BY u.username ASC
+    `, [req.user.id]);
+    res.json(result.rows);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Get pending friend requests (received)
+app.get('/api/friends/pending', auth, async (req, res) => {
+  try {
+    const result = await db(`
+      SELECT u.id, u.username, u.avatar, u.role, f.created_at as requested_at
+      FROM friendships f
+      JOIN users u ON f.sender_id = u.id
+      WHERE f.receiver_id = $1 AND f.status = 'pending'
+      ORDER BY f.created_at DESC
+    `, [req.user.id]);
+    res.json(result.rows);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Get friend status with a specific user
+app.get('/api/friends/status/:userId', auth, async (req, res) => {
+  try {
+    const otherId = parseInt(req.params.userId);
+    const result = await db(
+      'SELECT * FROM friendships WHERE (sender_id=$1 AND receiver_id=$2) OR (sender_id=$2 AND receiver_id=$1)',
+      [req.user.id, otherId]
+    );
+    if (result.rows.length === 0) return res.json({ status: 'none' });
+    const f = result.rows[0];
+    if (f.status === 'accepted') return res.json({ status: 'friends' });
+    if (f.status === 'pending' && f.sender_id === req.user.id) return res.json({ status: 'sent' });
+    if (f.status === 'pending' && f.receiver_id === req.user.id) return res.json({ status: 'received' });
+    res.json({ status: 'none' });
+  } catch (e) { res.json({ status: 'none' }); }
+});
+
+// Get pending requests count
+app.get('/api/friends/pending-count', auth, async (req, res) => {
+  try {
+    const result = await db("SELECT COUNT(*) as count FROM friendships WHERE receiver_id = $1 AND status = 'pending'", [req.user.id]);
+    res.json({ count: parseInt(result.rows[0].count) });
+  } catch (e) { res.json({ count: 0 }); }
 });
 
 // Public stats (no auth required)
